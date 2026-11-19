@@ -68,18 +68,24 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 <section class="panel">
 <div class="section">4. Clip-Vorschau & Export</div>
 <div id="previewInfo" class="muted">Wähle nach der Analyse einen Highlight-Vorschlag.</div>
-<label for="hook">Reaktionstext (editierbar)</label><textarea id="hook" rows="2" style="width:100%;box-sizing:border-box;background:#0c1424;color:white;border:1px solid #40516d;border-radius:10px;padding:12px;font:inherit" placeholder="Dein Hook"></textarea>
-<div class="actions"><button type="button" id="newHook" class="secondary">🔄 Anderen Text</button></div>
-<canvas id="canvas" width="360" height="640"></canvas>
+<label for="hookCategory">Hook-Kategorie</label>
+<select id="hookCategory"><option value="all">Alle Kategorien</option><option value="funny">Funny / Meme</option><option value="wtf">WTF / Unerwartet</option><option value="epic">Epic / Hype</option><option value="fail">Fail / Rage</option><option value="mystery">Secret / Neugier</option><option value="reaction">Streamer-Reaktion</option></select>
+<label for="hook">Reaktionstext (frei bearbeitbar)</label>
+<input id="hook" value="🎮 Dieser Moment war unerwartet!" maxlength="110" />
+<div class="actions"><button id="nextHook" class="secondary">🔄 Anderen Text</button><select id="hookPosition" aria-label="Textposition"><option value="top">Text oben</option><option value="middle">Text mittig</option><option value="bottom">Text unten</option></select></div>
+<p class="muted">Hooks sind Vorschläge, keine automatisch verifizierten Aussagen über den Videoinhalt.</p>
+<div class="actions"><button type="button" id="clearHistory" class="secondary">Wiederholungshistorie dieser Datei zurücksetzen</button></div>
+<p class="muted">Die Historie wird lokal in Safari gespeichert. Bereits vorgeschlagene Zeitbereiche werden beim erneuten Import derselben Datei übersprungen.</p>
+<canvas id="canvas" width="720" height="1280"></canvas>
 <div class="actions" style="margin-top:12px"><button id="preview" disabled>Vorschau starten</button><button id="export" disabled>Clip aufnehmen</button></div>
 <p class="muted">Export erfolgt als Echtzeit-Aufnahme der Vorschau. Format und Speichern hängen von iOS/Safari ab. Für lange Clips Bildschirm nicht sperren und Safari geöffnet lassen.</p>
 </section>
-<footer>CLIP-FINDER PRO · Browser Edition · Verarbeitung lokal auf deinem Gerät</footer>
+<footer>CLIP-FINDER PRO 2.2 · Browser Edition · Verarbeitung lokal auf deinem Gerät</footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let fileURL=null, selected=null, clips=[], audioCtx=null, source=null, analyser=null, raf=null, recording=false, audioDest=null, selectedHook=0;
-const video=$('video'), canvas=$('canvas'), ctx=canvas.getContext('2d');
+let fileURL=null, selected=null, clips=[], audioCtx=null, source=null, analyser=null, raf=null, recording=false, audioDest=null;
+const video=$('video'), canvas=$('canvas'), ctx=canvas.getContext('2d',{alpha:false});
 $('sensitivity').addEventListener('input',()=>{$('sensValue').textContent=['Niedrig','Mittel','Hoch'][+$('sensitivity').value-1]});
 $('file').addEventListener('change',e=>{
  const f=e.target.files?.[0]; if(!f)return;
@@ -115,36 +121,68 @@ function seekTo(time){
   try{video.currentTime=target;if(Math.abs(video.currentTime-target)<.15)finish(true)}catch(e){finish(false)}
  });
 }
+function sourceKey(){
+ const f=$('file').files?.[0];
+ if(!f)return 'unknown';
+ return [f.name,f.size,f.lastModified,Math.round(video.duration||0)].join('|');
+}
+function usedClipTimes(){
+ try{return JSON.parse(localStorage.getItem('cfp-used-'+encodeURIComponent(sourceKey()))||'[]')}catch(e){return []}
+}
+function saveUsedClipTimes(items){
+ try{
+  const old=usedClipTimes();
+  const merged=[...old,...items.map(c=>({start:Math.round(c.start),end:Math.round(c.end),at:Date.now()}))].slice(-250);
+  localStorage.setItem('cfp-used-'+encodeURIComponent(sourceKey()),JSON.stringify(merged));
+ }catch(e){}
+}
+function targetClipCount(seconds){
+ const m=seconds/60;
+ if(m<15)return 3;
+ if(m<30)return 5;
+ if(m<60)return 8;
+ if(m<120)return 12;
+ if(m<240)return 16;
+ return 20;
+}
 function completeScan(){
  analysisRunning=false;video.pause();
  const values=analysisSamples.map(x=>x.peak).filter(Number.isFinite);
- if(!values.length) throw new Error('Keine Audiodaten erkannt');
+ if(!values.length)throw new Error('Keine Audiodaten erkannt');
  const sorted=[...values].sort((a,b)=>a-b);
  const q=sorted[Math.floor(sorted.length*.72)]||.02;
  const mult=[1.8,1.35,1.05][+$('sensitivity').value-1];
  const threshold=Math.max(.009,q*mult);
- const win=+$('duration').value, candidates=[], centers=[];
+ const win=+$('duration').value,candidates=[];
  for(const s of analysisSamples){
+  const local=(s.peak*.72)+(s.avg*.28);
   if(s.peak>=threshold){
-   const c=Math.max(win/2,Math.min(video.duration-win/2,s.t));
-   if(!centers.some(x=>Math.abs(x-c)<win*.6)) centers.push(c);
+   const center=Math.max(win/2,Math.min(video.duration-win/2,s.t));
+   const start=Math.max(0,Math.min(Math.max(0,video.duration-win),center-win/2));
+   const end=Math.min(video.duration,start+win);
+   const nearby=analysisSamples.filter(x=>Math.abs(x.t-center)<=Math.max(30,win/2));
+   const context=nearby.length?nearby.reduce((n,x)=>n+x.peak*.72+x.avg*.28,0)/nearby.length:local;
+   candidates.push({start,end,score:local*.7+context*.3,peak:s.peak,avg:s.avg});
   }
  }
- for(const c of centers){
-  const st=Math.max(0,Math.min(Math.max(0,video.duration-win),c-win/2));
-  const en=Math.min(video.duration,st+win);
-  const nearby=analysisSamples.filter(x=>Math.abs(x.t-c)<=win/2);
-  const score=nearby.length?nearby.reduce((a,b)=>a+b.avg,0)/nearby.length:0;
-  candidates.push({start:st,end:en,score});
+ candidates.sort((x,y)=>y.score-x.score);
+ const used=usedClipTimes(), desired=targetClipCount(video.duration), fresh=[];
+ for(const c of candidates){
+  if(used.some(u=>Math.abs(c.start-u.start)<Math.max(45,win*1.5)))continue;
+  if(fresh.some(x=>Math.abs(x.start-c.start)<Math.max(45,win*1.5)))continue;
+  fresh.push(c);
+  if(fresh.length>=desired)break;
  }
- candidates.sort((a,b)=>b.score-a.score);
- clips=candidates.slice(0,10);
+ clips=fresh;
  if(!clips.length){
-  const st=Math.max(0,(video.duration-win)/2);
-  clips=[{start:st,end:Math.min(video.duration,st+win),score:0}];
-  setStatus('Keine deutlichen Audio-Spitzen in den geprüften Stichproben. Ein mittiger Clip dient als Ersatz.');
- } else setStatus(`${clips.length} Vorschläge aus ${analysisSamples.length} Audio-Stichproben. Wichtig: Ereignisse zwischen den Stichproben können übersehen werden.`);
- renderClips();video.currentTime=0;
+  $('results').textContent='Keine neuen, ausreichend unterschiedlichen Vorschläge gefunden. Erhöhe die Analyse-Dichte oder setze die lokale Historie zurück.';
+  setStatus('Alle passenden Zeitbereiche wurden bereits vorgeschlagen oder der Audio-Rang war zu niedrig.');
+ }else{
+  saveUsedClipTimes(clips);
+  setStatus(`${clips.length} neue Clips aus ${analysisSamples.length} Stichproben. Zielmenge nach Videolänge: ${desired}. Bereits vorgeschlagene Bereiche werden lokal gemieden.`);
+  renderClips();
+ }
+ video.currentTime=0;
  $('analyze').disabled=false;$('stopAnalyze').disabled=true;
 }
 function measureSample(){
@@ -205,49 +243,109 @@ $('stopAnalyze').onclick=()=>{
 };
 function renderClips(){
  $('results').innerHTML='';
- clips.forEach((c,i)=>{let d=document.createElement('div');d.className='clip';let left=document.createElement('div');left.innerHTML=`<b>Highlight ${i+1}</b><small>${fmt(c.start)} – ${fmt(c.end)} · Audio-Score ${(c.score*100).toFixed(1)}</small>`;let btn=document.createElement('button');btn.textContent='Auswählen';btn.onclick=()=>choose(i);d.append(left,btn);$('results').append(d)});
+ clips.forEach((c,i)=>{let d=document.createElement('div');d.className='clip';let left=document.createElement('div');left.innerHTML=`<b>Highlight ${i+1}</b><small>${fmt(c.start)} – ${fmt(c.end)} · Audio-Rang ${(c.score*100).toFixed(1)}</small>`;let btn=document.createElement('button');btn.textContent='Auswählen';btn.onclick=()=>choose(i);d.append(left,btn);$('results').append(d)});
 }
 function fmt(s){return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`}
-function choose(i){selected=clips[i];selectedHook=i%hooks.length;setHook();$('previewInfo').textContent=`Ausgewählt: ${fmt(selected.start)} – ${fmt(selected.end)}`;$('preview').disabled=false;$('export').disabled=false;video.currentTime=selected.start;drawFrame();}
-const hooks=[
-'😭 Damit hat niemand gerechnet','💀 WAS WAR DAS BITTE?!','😂 Ich kann nicht mehr','😳 Das ging komplett schief','🔥 Dieser Moment ist WILD','👀 Warte bis zum Ende','🤯 Das ist wirklich passiert','😂 Der Chat ist ausgerastet','💀 Er hat es sofort bereut','😱 Diese Reaktion ist unbezahlbar','🎮 GTA-Moment des Tages','🤣 Das Timing ist perfekt','😳 Was passiert hier gerade?','🔥 Das musst du sehen','💀 Absolut sprachlos'];
-function setHook(){$('hook').value=hooks[selectedHook%hooks.length];drawFrame()}
-$('newHook').onclick=()=>{selectedHook++;setHook()};
+function choose(i){selected=clips[i];nextHook();$('previewInfo').textContent=`Ausgewählt: ${fmt(selected.start)} – ${fmt(selected.end)}`;$('preview').disabled=false;$('export').disabled=false;video.currentTime=selected.start;drawFrame();}
+const hookLibrary={
+ funny:['😂 Ich kann nicht mehr!','💀 Das war so unnötig','🤣 Bitte sag mir, dass du das gesehen hast','😭 Der dümmste Moment heute','😂 Wie ist DAS passiert?','💀 Er hat alles versucht'],
+ wtf:['😳 WAS ist gerade passiert?!','🤯 Damit hat keiner gerechnet','👀 Warte… was?!','💀 Das kann doch nicht echt sein','😱 Dieser Moment kam aus dem Nichts','🫣 Schau dir das Ende an'],
+ epic:['🔥 DAS war knapp!','⚡ Was für ein Move','🏆 Absolut legendär','🚀 Dieser Moment ist wild','🎯 Perfektes Timing','🔥 GTA auf einem anderen Level'],
+ fail:['💀 Das ging komplett schief','😭 Größter Fehler des Tages','🤦 Das hätte besser laufen können','😂 Mission: komplett gescheitert','💥 Autsch. Einfach nur Autsch','😤 Das war persönlich'],
+ mystery:['👀 Hast du das im Hintergrund bemerkt?','🕵️ Ist dir dieses Detail aufgefallen?','🤔 Was passiert hier wirklich?','🔎 Schau beim zweiten Mal genau hin','👀 Das Detail übersieht fast jeder','❓ Zufall oder Easter Egg?'],
+ reaction:['😱 Seine Reaktion sagt alles','😂 Der Moment, in dem alles eskaliert','🎙️ Der Chat wird das lieben','😭 Diese Reaktion ist Gold','💀 Er war nicht bereit dafür','😳 Genau diese Reaktion!']
+};
+let lastHook='';
+function nextHook(){
+ const cat=$('hookCategory').value;
+ const pool=cat==='all'?Object.values(hookLibrary).flat():hookLibrary[cat];
+ let choices=pool.filter(t=>t!==lastHook&&t!==$('hook').value);
+ if(!choices.length)choices=pool.filter(t=>t!==lastHook);
+ const value=choices[Math.floor(Math.random()*choices.length)]||pool[0];
+ lastHook=value;$('hook').value=value;drawFrame();
+}
+$('nextHook').onclick=nextHook;
+$('hookCategory').onchange=nextHook;
 $('hook').addEventListener('input',drawFrame);
+$('hookPosition').onchange=drawFrame;
+function drawHook(){
+ const text=$('hook').value.trim();if(!text)return;
+ const W=canvas.width,H=canvas.height;
+ ctx.save();ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='bold 46px system-ui, sans-serif';
+ const maxWidth=W-80,words=text.split(/\s+/),lines=[];let line='';
+ for(const word of words){const test=line?line+' '+word:word;if(ctx.measureText(test).width>maxWidth&&line){lines.push(line);line=word}else line=test}
+ if(line)lines.push(line);
+ const pos=$('hookPosition').value;
+ const y0=pos==='bottom'?H-150-lines.length*58:pos==='middle'?H/2-lines.length*29:150;
+ ctx.lineWidth=10;ctx.strokeStyle='rgba(0,0,0,.96)';ctx.fillStyle='#fff';
+ lines.slice(0,4).forEach((l,i)=>{const y=y0+i*60;ctx.strokeText(l,W/2,y,maxWidth);ctx.fillText(l,W/2,y,maxWidth)});
+ ctx.restore();
+}
 function drawFrame(){
- if(video.readyState>=2){ctx.clearRect(0,0,360,640);let vw=video.videoWidth||16,vh=video.videoHeight||9,scale;
- if($('layout').value==='bars'){scale=Math.min(360/vw,640/vh);let w=vw*scale,h=vh*scale;ctx.fillStyle='#000';ctx.fillRect(0,0,360,640);ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
- else if($('layout').value==='crop'){scale=Math.max(360/vw,640/vh);let w=vw*scale,h=vh*scale;ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
- else {let scaleBg=Math.max(360/vw,640/vh),bw=vw*scaleBg,bh=vh*scaleBg;ctx.filter='blur(18px) brightness(.55)';ctx.drawImage(video,(360-bw)/2,(640-bh)/2,bw,bh);ctx.filter='none';let s=Math.min(360/vw,640/vh),w=vw*s,h=vh*s;ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
+ const W=canvas.width,H=canvas.height;
+ if(video.readyState>=2){
+  ctx.clearRect(0,0,W,H);
+  const vw=video.videoWidth||16,vh=video.videoHeight||9;
+  if($('layout').value==='bars'){
+   const s=Math.min(W/vw,H/vh),w=vw*s,h=vh*s;
+   ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);ctx.drawImage(video,(W-w)/2,(H-h)/2,w,h);
+  }else if($('layout').value==='crop'){
+   const s=Math.max(W/vw,H/vh),w=vw*s,h=vh*s;
+   ctx.drawImage(video,(W-w)/2,(H-h)/2,w,h);
+  }else{
+   const sb=Math.max(W/vw,H/vh),bw=vw*sb,bh=vh*sb;
+   ctx.save();ctx.filter='blur(36px) brightness(.55)';ctx.drawImage(video,(W-bw)/2,(H-bh)/2,bw,bh);ctx.restore();
+   const s=Math.min(W/vw,H/vh),w=vw*s,h=vh*s;
+   ctx.drawImage(video,(W-w)/2,(H-h)/2,w,h);
+  }
  }
- const hook=$('hook').value.trim();
- if(hook){ctx.save();ctx.font='bold 23px system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=5;ctx.strokeStyle='rgba(0,0,0,.95)';ctx.fillStyle='#fff';let words=hook.split(/\s+/),lines=[],line='';for(const w of words){let t=line?line+' '+w:w;if(ctx.measureText(t).width>320&&line){lines.push(line);line=w}else line=t}if(line)lines.push(line);lines=lines.slice(0,4);lines.forEach((t,i)=>{let y=95+i*31;ctx.strokeText(t,180,y);ctx.fillText(t,180,y)});ctx.restore()}
+ drawHook();
 }
 $('layout').onchange=drawFrame;
+$('clearHistory').onclick=()=>{
+ try{localStorage.removeItem('cfp-used-'+encodeURIComponent(sourceKey()));setStatus('Wiederholungshistorie dieser Datei zurückgesetzt.')}
+ catch(e){setStatus('Historie konnte nicht zurückgesetzt werden.')}
+};
 $('preview').onclick=async()=>{if(!selected)return;video.currentTime=selected.start;await video.play();const tick=()=>{drawFrame();if(video.currentTime>=selected.end||video.paused){video.pause();return}requestAnimationFrame(tick)};tick()};
 function mimeType(){for(const t of ['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t;return ''}
 $('export').onclick=async()=>{
  if(!selected||recording)return;
- if(typeof canvas.captureStream!=='function'){setStatus('Canvas-Export wird von diesem Browser nicht unterstützt.');return}
- try{if(!getAudioNodes()||!audioDest)throw new Error('Audio-Routing nicht verfügbar');await audioCtx.resume()}catch(e){setStatus('Export mit Ton nicht möglich: Audio-Routing konnte nicht aktiviert werden.');return}
- const stream=canvas.captureStream(30);
- const audioTracks=audioDest.stream.getAudioTracks();
- if(!audioTracks.length){setStatus('Export abgebrochen: Keine Audiospur verfügbar.');stream.getTracks().forEach(t=>t.stop());return}
- audioTracks.forEach(t=>stream.addTrack(t));
- const mime=mimeType();if(!mime){setStatus('Safari unterstützt hier kein geeignetes Aufnahmeformat.');stream.getTracks().forEach(t=>t.stop());return}
- let chunks=[];let rec;try{rec=new MediaRecorder(stream,{mimeType:mime})}catch(e){setStatus('Aufnahme konnte nicht gestartet werden.');stream.getTracks().forEach(t=>t.stop());return}
- recording=true;$('export').disabled=true;
- let finished=false;
- const stop=()=>{if(finished)return;finished=true;video.pause();if(rec.state!=='inactive')rec.stop()};
- rec.onerror=()=>{setStatus('Fehler bei der Aufnahme.');stop()};
- rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
- rec.onstop=()=>{recording=false;const blob=new Blob(chunks,{type:mime});stream.getTracks().forEach(t=>t.stop());$('export').disabled=false;if(!blob.size){setStatus('Export fehlgeschlagen: leere Aufnahme.');return}const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clip-finder-${Date.now()}.${mime.includes('mp4')?'mp4':'webm'}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);setStatus(`Export erstellt (${(blob.size/1024/1024).toFixed(1)} MB). Ton bitte in der gespeicherten Datei prüfen.`)};
+ $('export').disabled=true;
+ let stream,rec,started=false;
  try{
-  video.pause();await seekTo(selected.start);
-  drawFrame();rec.start(500);await video.play();
-  const render=()=>{if(finished)return;drawFrame();if(video.currentTime>=selected.end||video.ended){stop();return}if(video.paused){setStatus('Video wurde während des Exports angehalten.');stop();return}requestAnimationFrame(render)};render();
-  setTimeout(()=>{if(!finished){setStatus('Export-Zeitlimit erreicht.');stop()}},Math.max(15000,(selected.end-selected.start+12)*1000));
- }catch(e){console.error(e);setStatus('Export abgebrochen: Video konnte nicht zuverlässig zur Startposition springen.');stop()}
+  if(!getAudioNodes()||!audioDest)throw new Error('Audioverbindung nicht verfügbar');
+  await audioCtx.resume();
+  if(audioCtx.state!=='running')throw new Error('Audio wurde von iOS blockiert');
+  if(typeof canvas.captureStream!=='function')throw new Error('Canvas-Aufnahme nicht unterstützt');
+  stream=canvas.captureStream(30);
+  const tracks=audioDest.stream.getAudioTracks();
+  if(!tracks.length)throw new Error('Keine Audiospur für Aufnahme verfügbar');
+  tracks.forEach(t=>stream.addTrack(t));
+  const mime=mimeType();if(!mime)throw new Error('Kein kompatibles Aufnahmeformat');
+  rec=new MediaRecorder(stream,{mimeType:mime});
+  const chunks=[];
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  rec.onerror=()=>setStatus('Aufnahmefehler in Safari. Export nicht abgeschlossen.');
+  rec.onstop=()=>{
+   recording=false;const blob=new Blob(chunks,{type:mime});
+   if(blob.size<1024){setStatus('Export fehlgeschlagen: keine brauchbare Videodatei erzeugt.');$('export').disabled=false;return}
+   const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clip-finder-${Date.now()}.${mime.includes('mp4')?'mp4':'webm'}`;
+   document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);
+   setStatus(`Export erstellt (${(blob.size/1024/1024).toFixed(1)} MB). Bitte Ton im gespeicherten Clip prüfen.`);
+   $('export').disabled=false;stream.getTracks().forEach(t=>t.stop());
+  };
+  video.pause();await seekTo(selected.start);drawFrame();
+  // Start playback first; this avoids recording long silent preroll during iOS seek.
+  await video.play();rec.start(500);started=true;recording=true;
+  const render=()=>{
+   if(!recording)return;drawFrame();
+   if(video.currentTime>=selected.end||video.ended||video.paused){video.pause();if(rec.state!=='inactive')rec.stop();return}
+   requestAnimationFrame(render)
+  };render();
+ }catch(e){console.error(e);recording=false;video.pause();if(rec&&rec.state==='recording')rec.stop();
+  setStatus('Export nicht möglich: '+e.message+'. Prüfe Safari und versuche einen kürzeren Clip.');$('export').disabled=false;
+  if(stream&&!started)stream.getTracks().forEach(t=>t.stop());
+ }
 };
 if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script></body></html>
