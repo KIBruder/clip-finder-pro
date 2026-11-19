@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#090d16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Clip Finder">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>CLIP-FINDER PRO</title>
+<style>
+:root{color-scheme:dark;--bg:#090d16;--panel:#121a29;--line:#25334a;--muted:#9aabc2;--accent:#75e0bd;--white:#f4f7fb}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#15243a 0,#090d16 55%);color:var(--white);font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:env(safe-area-inset-top) 14px calc(24px + env(safe-area-inset-bottom))}
+main{max-width:760px;margin:auto}.top{display:flex;align-items:center;justify-content:space-between;padding:18px 2px 14px}.brand{font-weight:900;letter-spacing:1.3px;font-size:18px}.tag{font-size:11px;color:var(--accent);border:1px solid #286b5a;padding:5px 8px;border-radius:99px}
+h1{font-size:25px;margin:12px 0 5px}p.sub{color:var(--muted);margin:0 0 18px;line-height:1.45}
+.panel{background:linear-gradient(145deg,#151f30,#101725);border:1px solid var(--line);border-radius:18px;padding:15px;margin:12px 0;box-shadow:0 10px 30px #0003}
+.section{font-weight:750;margin:0 0 12px}.upload{display:block;border:1.5px dashed #49617e;border-radius:14px;padding:20px 14px;text-align:center;background:#0c1421}
+.upload strong{display:block;font-size:16px;margin:7px}.upload small{color:var(--muted)}input[type=file]{display:none}
+button,.btn{border:0;border-radius:12px;background:var(--accent);color:#07130f;font-weight:800;padding:13px 15px;font-size:14px;cursor:pointer}
+button.secondary{background:#24334a;color:var(--white);border:1px solid #3a4d69}button:disabled{opacity:.4}
+video{width:100%;max-height:360px;background:#03060b;border-radius:12px;margin-top:12px}
+label{display:block;color:#c4d0df;font-size:13px;margin:12px 0 7px}
+select,input[type=range]{width:100%}select{background:#0b1320;color:white;border:1px solid #34445d;border-radius:10px;padding:12px;font-size:15px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.muted{color:var(--muted);font-size:12px;line-height:1.5}
+.actions{display:flex;gap:8px;flex-wrap:wrap}.actions button{flex:1;min-width:120px}
+#status{color:var(--accent);font-size:13px;margin-top:10px;min-height:18px}
+#results{display:grid;gap:9px}.clip{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px;border-radius:12px;background:#0b1422;border:1px solid #26364d}.clip b{display:block}.clip small{color:var(--muted)}.clip button{padding:9px 12px}
+canvas{width:100%;border-radius:12px;background:#000;display:block}
+footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
+@media(max-width:390px){.row{grid-template-columns:1fr}.brand{font-size:16px}}
+</style>
+</head>
+<body><main>
+<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA · 0 €</div></div>
+<h1>Finde deine besten Momente.</h1><p class="sub">Lokale Videoanalyse direkt auf deinem iPhone. Deine Videodatei wird nicht hochgeladen.</p>
+<section class="panel">
+<div class="section">1. Video auswählen</div>
+<label class="upload" for="file"><div style="font-size:28px">＋</div><strong>Video aus Fotos oder Dateien wählen</strong><small>MP4 / MOV · möglichst kurze Testdatei empfohlen</small></label>
+<input id="file" type="file" accept="video/*">
+<div id="fileInfo" class="muted" style="margin-top:10px">Noch kein Video ausgewählt.</div>
+<video id="video" controls playsinline hidden></video>
+</section>
+<section class="panel">
+<div class="section">2. Clip-Einstellungen</div>
+<div class="row">
+<div><label for="duration">Clip-Länge</label><select id="duration"><option value="20">15–25 Sekunden</option><option value="30">30 Sekunden</option><option value="45">45 Sekunden</option><option value="61">61 Sekunden</option></select></div>
+<div><label for="layout">Hochformat-Layout</label><select id="layout"><option value="blur">9:16 mit Blur-Hintergrund</option><option value="crop">9:16 Bild füllen / zuschneiden</option><option value="bars">9:16 mit schwarzen Balken</option></select></div>
+</div>
+<label for="sensitivity">Erkennungs-Empfindlichkeit: <span id="sensValue">Mittel</span></label>
+<input id="sensitivity" type="range" min="1" max="3" value="2">
+<p class="muted">Die erste Version erkennt Audio-Spitzen und Aktivität. Sie versteht noch nicht semantisch, ob eine Szene lustig oder spannend ist.</p>
+<div class="actions"><button id="analyze" disabled>Beste Stellen finden</button><button id="stopAnalyze" class="secondary" disabled>Abbrechen</button></div>
+<div id="status"></div>
+</section>
+<section class="panel">
+<div class="section">3. Gefundene Highlights</div>
+<div id="results" class="muted">Noch keine Analyse durchgeführt.</div>
+</section>
+<section class="panel">
+<div class="section">4. Clip-Vorschau & Export</div>
+<div id="previewInfo" class="muted">Wähle nach der Analyse einen Highlight-Vorschlag.</div>
+<canvas id="canvas" width="360" height="640"></canvas>
+<div class="actions" style="margin-top:12px"><button id="preview" disabled>Vorschau starten</button><button id="export" disabled>Clip aufnehmen</button></div>
+<p class="muted">Export erfolgt als Echtzeit-Aufnahme der Vorschau. Format und Speichern hängen von iOS/Safari ab. Für lange Clips Bildschirm nicht sperren und Safari geöffnet lassen.</p>
+</section>
+<footer>CLIP-FINDER PRO · Browser Edition · Verarbeitung lokal auf deinem Gerät</footer>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let fileURL=null, selected=null, clips=[], audioCtx=null, source=null, analyser=null, raf=null, recording=false;
+const video=$('video'), canvas=$('canvas'), ctx=canvas.getContext('2d');
+$('sensitivity').addEventListener('input',()=>{$('sensValue').textContent=['Niedrig','Mittel','Hoch'][+$('sensitivity').value-1]});
+$('file').addEventListener('change',e=>{
+ const f=e.target.files?.[0]; if(!f)return;
+ if(fileURL)URL.revokeObjectURL(fileURL);fileURL=URL.createObjectURL(f);video.src=fileURL;video.hidden=false;
+ $('fileInfo').textContent=`${f.name} · ${(f.size/1024/1024).toFixed(1)} MB`;
+ $('analyze').disabled=false;$('results').textContent='Video geladen. Starte die Analyse.';$('status').textContent='';
+ clips=[];selected=null;$('preview').disabled=true;$('export').disabled=true;
+});
+function setStatus(s){$('status').textContent=s}
+$('analyze').onclick=async()=>{
+ if(!video.duration||!isFinite(video.duration)){setStatus('Video konnte nicht gelesen werden. Bitte anderes Format versuchen.');return}
+ $('analyze').disabled=true;$('stopAnalyze').disabled=false;setStatus('Audio wird analysiert …');
+ try{
+  const ac=new (window.AudioContext||window.webkitAudioContext)();
+  const res=await fetch(fileURL),ab=await res.arrayBuffer();const decoded=await ac.decodeAudioData(ab);
+  const data=decoded.getChannelData(0),sr=decoded.sampleRate,step=Math.floor(sr*.25),rms=[];
+  for(let i=0;i<data.length;i+=step){let sum=0,n=Math.min(step,data.length-i);for(let j=0;j<n;j++)sum+=data[i+j]*data[i+j];rms.push(Math.sqrt(sum/n))}
+  const sorted=[...rms].sort((a,b)=>a-b),q=sorted[Math.floor(sorted.length*.72)]||.03;
+  const mult=[1.8,1.35,1.05][+$('sensitivity').value-1],threshold=Math.max(.012,q*mult);
+  const win=+$('duration').value, candidates=[];
+  let peaks=[];for(let i=0;i<rms.length;i++)if(rms[i]>=threshold)peaks.push(i*.25);
+  const centers=[];for(let p of peaks){let c=Math.max(win/2,Math.min(video.duration-win/2,p));if(!centers.some(x=>Math.abs(x-c)<win*.55))centers.push(c)}
+  for(let c of centers){let start=Math.max(0,c-win/2),end=Math.min(video.duration,start+win);let a=Math.floor(start/.25),b=Math.min(rms.length,Math.ceil(end/.25));let score=0;for(let i=a;i<b;i++)score+=rms[i];score/=Math.max(1,b-a);candidates.push({start,end,score})}
+  candidates.sort((a,b)=>b.score-a.score);clips=candidates.slice(0,8);
+  if(!clips.length){clips=[{start:0,end:Math.min(win,video.duration),score:0}]}
+  renderClips();setStatus(`${clips.length} Vorschläge erstellt. Lautstärke-Spitzen sind Indikatoren, keine Viralitätsgarantie.`);
+  await ac.close();
+ }catch(err){setStatus('Audioanalyse fehlgeschlagen. iOS kann große Videospeicher/Audio-Decodierung begrenzen. Versuche ein kürzeres MP4/MOV.');console.error(err)}
+ $('analyze').disabled=false;$('stopAnalyze').disabled=true;
+};
+$('stopAnalyze').onclick=()=>{setStatus('Analyse kann nach Start nicht sofort unterbrochen werden.');};
+function renderClips(){
+ $('results').innerHTML='';
+ clips.forEach((c,i)=>{let d=document.createElement('div');d.className='clip';let left=document.createElement('div');left.innerHTML=`<b>Highlight ${i+1}</b><small>${fmt(c.start)} – ${fmt(c.end)} · Audio-Score ${(c.score*100).toFixed(1)}</small>`;let btn=document.createElement('button');btn.textContent='Auswählen';btn.onclick=()=>choose(i);d.append(left,btn);$('results').append(d)});
+}
+function fmt(s){return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`}
+function choose(i){selected=clips[i];$('previewInfo').textContent=`Ausgewählt: ${fmt(selected.start)} – ${fmt(selected.end)}`;$('preview').disabled=false;$('export').disabled=false;video.currentTime=selected.start;drawFrame();}
+function drawFrame(){
+ if(video.readyState>=2){ctx.clearRect(0,0,360,640);let vw=video.videoWidth||16,vh=video.videoHeight||9,scale;
+ if($('layout').value==='bars'){scale=Math.min(360/vw,640/vh);let w=vw*scale,h=vh*scale;ctx.fillStyle='#000';ctx.fillRect(0,0,360,640);ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
+ else if($('layout').value==='crop'){scale=Math.max(360/vw,640/vh);let w=vw*scale,h=vh*scale;ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
+ else {let scaleBg=Math.max(360/vw,640/vh),bw=vw*scaleBg,bh=vh*scaleBg;ctx.filter='blur(18px) brightness(.55)';ctx.drawImage(video,(360-bw)/2,(640-bh)/2,bw,bh);ctx.filter='none';let s=Math.min(360/vw,640/vh),w=vw*s,h=vh*s;ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
+ }
+}
+$('layout').onchange=drawFrame;
+$('preview').onclick=async()=>{if(!selected)return;video.currentTime=selected.start;await video.play();const tick=()=>{drawFrame();if(video.currentTime>=selected.end||video.paused){video.pause();return}requestAnimationFrame(tick)};tick()};
+function mimeType(){for(const t of ['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t;return ''}
+$('export').onclick=async()=>{
+ if(!selected||recording)return;
+ const stream=canvas.captureStream(30);let audioStream=null;
+ try{const ac=new (window.AudioContext||window.webkitAudioContext)();const src=ac.createMediaElementSource(video);const dest=ac.createMediaStreamDestination();src.connect(dest);src.connect(ac.destination);audioStream=dest.stream;audioStream.getAudioTracks().forEach(t=>stream.addTrack(t));await ac.resume()}catch(e){console.warn('Audio capture unavailable',e)}
+ const mime=mimeType();if(!mime){setStatus('Dieser Safari-Browser unterstützt MediaRecorder nicht mit einem kompatiblen Videoformat.');return}
+ let chunks=[];let rec;try{rec=new MediaRecorder(stream,{mimeType:mime})}catch(e){setStatus('Aufnahmeformat wird von diesem Browser nicht unterstützt.');return}
+ recording=true;$('export').disabled=true;video.currentTime=selected.start;drawFrame();
+ rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+ rec.onstop=()=>{recording=false;const blob=new Blob(chunks,{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clip-finder-${Date.now()}.${mime.includes('mp4')?'mp4':'webm'}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);setStatus(`Export erstellt (${(blob.size/1024/1024).toFixed(1)} MB). Falls kein Download erscheint: Teilen-Menü verwenden.`);$('export').disabled=false;stream.getTracks().forEach(t=>t.stop())};
+ rec.start(500);await video.play();
+ const render=()=>{drawFrame();if(video.currentTime>=selected.end){video.pause();rec.stop();return}requestAnimationFrame(render)};render();
+};
+if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
+</script></body></html>
