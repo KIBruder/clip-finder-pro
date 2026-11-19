@@ -33,14 +33,14 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 </style>
 </head>
 <body><main>
-<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA · 0 €</div></div>
+<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA 2.0 · 0 €</div></div>
 <h1>Finde deine besten Momente.</h1><p class="sub">Lokale Videoanalyse direkt auf deinem iPhone. Deine Videodatei wird nicht hochgeladen.</p>
 <section class="panel">
 <div class="section">1. Video auswählen</div>
 <label class="upload" for="file"><div style="font-size:28px">＋</div><strong>Video aus Fotos oder Dateien wählen</strong><small>MP4 / MOV · möglichst kurze Testdatei empfohlen</small></label>
 <input id="file" type="file" accept="video/*">
 <div id="fileInfo" class="muted" style="margin-top:10px">Noch kein Video ausgewählt.</div>
-<video id="video" controls playsinline hidden></video>
+<video id="video" controls playsinline preload="metadata" hidden></video>
 </section>
 <section class="panel">
 <div class="section">2. Clip-Einstellungen</div>
@@ -48,9 +48,16 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 <div><label for="duration">Clip-Länge</label><select id="duration"><option value="20">15–25 Sekunden</option><option value="30">30 Sekunden</option><option value="45">45 Sekunden</option><option value="61">61 Sekunden</option></select></div>
 <div><label for="layout">Hochformat-Layout</label><select id="layout"><option value="blur">9:16 mit Blur-Hintergrund</option><option value="crop">9:16 Bild füllen / zuschneiden</option><option value="bars">9:16 mit schwarzen Balken</option></select></div>
 </div>
+<label for="scanMode">Analyse-Dichte für lange Videos</label>
+<select id="scanMode">
+<option value="300">Schnell: alle 5 Minuten prüfen (ca. 5 Min. je 6 Std.)</option>
+<option value="120" selected>Ausgewogen: alle 2 Minuten prüfen (ca. 12 Min. je 6 Std.)</option>
+<option value="60">Dichter: jede Minute prüfen (ca. 24 Min. je 6 Std.)</option>
+</select>
+<p class="muted">Es werden kurze Audiofenster an vielen Zeitpunkten geprüft. Das ist deutlich schneller als den ganzen Stream abzuspielen, kann aber Ereignisse zwischen den Stichproben übersehen.</p>
 <label for="sensitivity">Erkennungs-Empfindlichkeit: <span id="sensValue">Mittel</span></label>
 <input id="sensitivity" type="range" min="1" max="3" value="2">
-<p class="muted">Die erste Version erkennt Audio-Spitzen und Aktivität. Sie versteht noch nicht semantisch, ob eine Szene lustig oder spannend ist.</p>
+<p class="muted">Die App springt durch den Stream und prüft kurze Audiofenster. Die Originaldatei wird nicht vollständig in den Arbeitsspeicher kopiert. Safari muss während der Analyse geöffnet bleiben.</p>
 <div class="actions"><button id="analyze" disabled>Beste Stellen finden</button><button id="stopAnalyze" class="secondary" disabled>Abbrechen</button></div>
 <div id="status"></div>
 </section>
@@ -74,34 +81,124 @@ const video=$('video'), canvas=$('canvas'), ctx=canvas.getContext('2d');
 $('sensitivity').addEventListener('input',()=>{$('sensValue').textContent=['Niedrig','Mittel','Hoch'][+$('sensitivity').value-1]});
 $('file').addEventListener('change',e=>{
  const f=e.target.files?.[0]; if(!f)return;
- if(fileURL)URL.revokeObjectURL(fileURL);fileURL=URL.createObjectURL(f);video.src=fileURL;video.hidden=false;
- $('fileInfo').textContent=`${f.name} · ${(f.size/1024/1024).toFixed(1)} MB`;
+ if(fileURL)URL.revokeObjectURL(fileURL);fileURL=URL.createObjectURL(f);video.src=fileURL;video.load();video.hidden=false;
+ $('fileInfo').textContent=`${f.name} · ${(f.size/1024/1024/1024).toFixed(2)} GB · Datei lokal ausgewählt`; video.onloadedmetadata=()=>{$('fileInfo').textContent=`${f.name} · ${(f.size/1024/1024/1024).toFixed(2)} GB · ${fmt(video.duration)} · ${video.videoWidth}×${video.videoHeight}`;}; video.onerror=()=>setStatus('Safari kann dieses Video nicht decodieren. Bitte MP4/H.264 prüfen.');
  $('analyze').disabled=false;$('results').textContent='Video geladen. Starte die Analyse.';$('status').textContent='';
  clips=[];selected=null;$('preview').disabled=true;$('export').disabled=true;
 });
 function setStatus(s){$('status').textContent=s}
-$('analyze').onclick=async()=>{
- if(!video.duration||!isFinite(video.duration)){setStatus('Video konnte nicht gelesen werden. Bitte anderes Format versuchen.');return}
- $('analyze').disabled=true;$('stopAnalyze').disabled=false;setStatus('Audio wird analysiert …');
- try{
-  const ac=new (window.AudioContext||window.webkitAudioContext)();
-  const res=await fetch(fileURL),ab=await res.arrayBuffer();const decoded=await ac.decodeAudioData(ab);
-  const data=decoded.getChannelData(0),sr=decoded.sampleRate,step=Math.floor(sr*.25),rms=[];
-  for(let i=0;i<data.length;i+=step){let sum=0,n=Math.min(step,data.length-i);for(let j=0;j<n;j++)sum+=data[i+j]*data[i+j];rms.push(Math.sqrt(sum/n))}
-  const sorted=[...rms].sort((a,b)=>a-b),q=sorted[Math.floor(sorted.length*.72)]||.03;
-  const mult=[1.8,1.35,1.05][+$('sensitivity').value-1],threshold=Math.max(.012,q*mult);
-  const win=+$('duration').value, candidates=[];
-  let peaks=[];for(let i=0;i<rms.length;i++)if(rms[i]>=threshold)peaks.push(i*.25);
-  const centers=[];for(let p of peaks){let c=Math.max(win/2,Math.min(video.duration-win/2,p));if(!centers.some(x=>Math.abs(x-c)<win*.55))centers.push(c)}
-  for(let c of centers){let start=Math.max(0,c-win/2),end=Math.min(video.duration,start+win);let a=Math.floor(start/.25),b=Math.min(rms.length,Math.ceil(end/.25));let score=0;for(let i=a;i<b;i++)score+=rms[i];score/=Math.max(1,b-a);candidates.push({start,end,score})}
-  candidates.sort((a,b)=>b.score-a.score);clips=candidates.slice(0,8);
-  if(!clips.length){clips=[{start:0,end:Math.min(win,video.duration),score:0}]}
-  renderClips();setStatus(`${clips.length} Vorschläge erstellt. Lautstärke-Spitzen sind Indikatoren, keine Viralitätsgarantie.`);
-  await ac.close();
- }catch(err){setStatus('Audioanalyse fehlgeschlagen. iOS kann große Videospeicher/Audio-Decodierung begrenzen. Versuche ein kürzeres MP4/MOV.');console.error(err)}
+let analysisRunning=false, analysisSamples=[], scanPositions=[], scanIndex=0, samplePeak=0, sampleSum=0, sampleCount=0, sampleStarted=0, lastMeasure=0;
+function getAudioNodes(){
+ if(analyser && source) return true;
+ const AC=window.AudioContext||window.webkitAudioContext;
+ if(!AC) return false;
+ audioCtx=new AC();
+ source=audioCtx.createMediaElementSource(video);
+ analyser=audioCtx.createAnalyser();
+ analyser.fftSize=1024;
+ source.connect(analyser);
+ analyser.connect(audioCtx.destination);
+ return true;
+}
+function seekTo(time){
+ return new Promise((resolve,reject)=>{
+  const target=Math.max(0,Math.min(time,Math.max(0,video.duration-.25)));
+  let done=false;
+  const finish=(ok)=>{if(done)return;done=true;clearTimeout(timer);video.removeEventListener('seeked',onSeek);ok?resolve():reject(new Error('Seek timeout'))};
+  const onSeek=()=>finish(true);
+  const timer=setTimeout(()=>finish(false),12000);
+  video.addEventListener('seeked',onSeek,{once:true});
+  try{video.currentTime=target;if(Math.abs(video.currentTime-target)<.15)finish(true)}catch(e){finish(false)}
+ });
+}
+function completeScan(){
+ analysisRunning=false;video.pause();
+ const values=analysisSamples.map(x=>x.peak).filter(Number.isFinite);
+ if(!values.length) throw new Error('Keine Audiodaten erkannt');
+ const sorted=[...values].sort((a,b)=>a-b);
+ const q=sorted[Math.floor(sorted.length*.72)]||.02;
+ const mult=[1.8,1.35,1.05][+$('sensitivity').value-1];
+ const threshold=Math.max(.009,q*mult);
+ const win=+$('duration').value, candidates=[], centers=[];
+ for(const s of analysisSamples){
+  if(s.peak>=threshold){
+   const c=Math.max(win/2,Math.min(video.duration-win/2,s.t));
+   if(!centers.some(x=>Math.abs(x-c)<win*.6)) centers.push(c);
+  }
+ }
+ for(const c of centers){
+  const st=Math.max(0,Math.min(Math.max(0,video.duration-win),c-win/2));
+  const en=Math.min(video.duration,st+win);
+  const nearby=analysisSamples.filter(x=>Math.abs(x.t-c)<=win/2);
+  const score=nearby.length?nearby.reduce((a,b)=>a+b.avg,0)/nearby.length:0;
+  candidates.push({start:st,end:en,score});
+ }
+ candidates.sort((a,b)=>b.score-a.score);
+ clips=candidates.slice(0,10);
+ if(!clips.length){
+  const st=Math.max(0,(video.duration-win)/2);
+  clips=[{start:st,end:Math.min(video.duration,st+win),score:0}];
+  setStatus('Keine deutlichen Audio-Spitzen in den geprüften Stichproben. Ein mittiger Clip dient als Ersatz.');
+ } else setStatus(`${clips.length} Vorschläge aus ${analysisSamples.length} Audio-Stichproben. Wichtig: Ereignisse zwischen den Stichproben können übersehen werden.`);
+ renderClips();video.currentTime=0;
  $('analyze').disabled=false;$('stopAnalyze').disabled=true;
+}
+function measureSample(){
+ const buffer=new Float32Array(analyser.fftSize);
+ analyser.getFloatTimeDomainData(buffer);
+ let ss=0;for(let i=0;i<buffer.length;i++)ss+=buffer[i]*buffer[i];
+ const rms=Math.sqrt(ss/buffer.length);
+ sampleSum+=rms;sampleCount++;if(rms>samplePeak)samplePeak=rms;
+}
+async function startCurrentSample(){
+ if(!analysisRunning)return;
+ if(scanIndex>=scanPositions.length){completeScan();return}
+ const at=scanPositions[scanIndex];
+ setStatus(`Prüfe Abschnitt ${scanIndex+1}/${scanPositions.length} · ${fmt(at)} von ${fmt(video.duration)} …`);
+ await seekTo(at);
+ samplePeak=0;sampleSum=0;sampleCount=0;lastMeasure=0;sampleStarted=performance.now();
+ await video.play();
+ const tick=()=>{
+  if(!analysisRunning)return;
+  const elapsed=(performance.now()-sampleStarted)/1000;
+  if(performance.now()-lastMeasure>90){measureSample();lastMeasure=performance.now()}
+  if(elapsed>=4 || video.currentTime>=at+4){
+   video.pause();
+   analysisSamples.push({t:at+2,peak:samplePeak,avg:sampleCount?sampleSum/sampleCount:0});
+   scanIndex++;
+   startCurrentSample().catch(failScan);
+   return;
+  }
+  if(elapsed>15){failScan(new Error('Sample timeout'));return}
+  raf=requestAnimationFrame(tick);
+ };
+ raf=requestAnimationFrame(tick);
+}
+function failScan(err){
+ console.error(err);analysisRunning=false;video.pause();
+ $('analyze').disabled=false;$('stopAnalyze').disabled=true;
+ setStatus('Analyse unterbrochen. Safari konnte einen Abschnitt nicht laden. Du kannst es mit einer kleineren Datei erneut versuchen.');
+}
+$('analyze').onclick=async()=>{
+ if(analysisRunning)return;
+ if(!video.duration||!isFinite(video.duration)){setStatus('Video wird noch geladen. Bitte kurz warten und erneut versuchen.');return}
+ if(video.duration<5){setStatus('Das Video ist zu kurz.');return}
+ $('analyze').disabled=true;$('stopAnalyze').disabled=false;
+ analysisRunning=true;analysisSamples=[];scanIndex=0;
+ try{
+  if(!getAudioNodes())throw new Error('Web Audio API nicht verfügbar');
+  await audioCtx.resume();
+  const spacing=+$('scanMode').value;
+  scanPositions=[];
+  for(let t=0;t<video.duration;t+=spacing)scanPositions.push(Math.min(t,Math.max(0,video.duration-4)));
+  if(!scanPositions.length)scanPositions=[0];
+  video.pause();video.muted=false;
+  await startCurrentSample();
+ }catch(err){failScan(err)}
 };
-$('stopAnalyze').onclick=()=>{setStatus('Analyse kann nach Start nicht sofort unterbrochen werden.');};
+$('stopAnalyze').onclick=()=>{
+ if(analysisRunning){analysisRunning=false;cancelAnimationFrame(raf);video.pause();$('analyze').disabled=false;$('stopAnalyze').disabled=true;setStatus(`Analyse abgebrochen. ${analysisSamples.length} Stichproben wurden bisher geprüft.`);}
+};
 function renderClips(){
  $('results').innerHTML='';
  clips.forEach((c,i)=>{let d=document.createElement('div');d.className='clip';let left=document.createElement('div');left.innerHTML=`<b>Highlight ${i+1}</b><small>${fmt(c.start)} – ${fmt(c.end)} · Audio-Score ${(c.score*100).toFixed(1)}</small>`;let btn=document.createElement('button');btn.textContent='Auswählen';btn.onclick=()=>choose(i);d.append(left,btn);$('results').append(d)});
@@ -121,7 +218,7 @@ function mimeType(){for(const t of ['video/mp4;codecs=h264','video/mp4','video/w
 $('export').onclick=async()=>{
  if(!selected||recording)return;
  const stream=canvas.captureStream(30);let audioStream=null;
- try{const ac=new (window.AudioContext||window.webkitAudioContext)();const src=ac.createMediaElementSource(video);const dest=ac.createMediaStreamDestination();src.connect(dest);src.connect(ac.destination);audioStream=dest.stream;audioStream.getAudioTracks().forEach(t=>stream.addTrack(t));await ac.resume()}catch(e){console.warn('Audio capture unavailable',e)}
+ try{const ac=new (window.AudioContext||window.webkitAudioContext)();const dest=ac.createMediaStreamDestination();if(source){source.connect(dest);}else{const src=ac.createMediaElementSource(video);src.connect(dest);src.connect(ac.destination);source=src;}audioStream=dest.stream;audioStream.getAudioTracks().forEach(t=>stream.addTrack(t));await ac.resume()}catch(e){console.warn('Audio capture unavailable',e)}
  const mime=mimeType();if(!mime){setStatus('Dieser Safari-Browser unterstützt MediaRecorder nicht mit einem kompatiblen Videoformat.');return}
  let chunks=[];let rec;try{rec=new MediaRecorder(stream,{mimeType:mime})}catch(e){setStatus('Aufnahmeformat wird von diesem Browser nicht unterstützt.');return}
  recording=true;$('export').disabled=true;video.currentTime=selected.start;drawFrame();
