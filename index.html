@@ -33,7 +33,7 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 </style>
 </head>
 <body><main>
-<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA 2.0 · 0 €</div></div>
+<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA 2.1 · 0 €</div></div>
 <h1>Finde deine besten Momente.</h1><p class="sub">Lokale Videoanalyse direkt auf deinem iPhone. Deine Videodatei wird nicht hochgeladen.</p>
 <section class="panel">
 <div class="section">1. Video auswählen</div>
@@ -68,6 +68,8 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 <section class="panel">
 <div class="section">4. Clip-Vorschau & Export</div>
 <div id="previewInfo" class="muted">Wähle nach der Analyse einen Highlight-Vorschlag.</div>
+<label for="hook">Reaktionstext (editierbar)</label><textarea id="hook" rows="2" style="width:100%;box-sizing:border-box;background:#0c1424;color:white;border:1px solid #40516d;border-radius:10px;padding:12px;font:inherit" placeholder="Dein Hook"></textarea>
+<div class="actions"><button type="button" id="newHook" class="secondary">🔄 Anderen Text</button></div>
 <canvas id="canvas" width="360" height="640"></canvas>
 <div class="actions" style="margin-top:12px"><button id="preview" disabled>Vorschau starten</button><button id="export" disabled>Clip aufnehmen</button></div>
 <p class="muted">Export erfolgt als Echtzeit-Aufnahme der Vorschau. Format und Speichern hängen von iOS/Safari ab. Für lange Clips Bildschirm nicht sperren und Safari geöffnet lassen.</p>
@@ -76,7 +78,7 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let fileURL=null, selected=null, clips=[], audioCtx=null, source=null, analyser=null, raf=null, recording=false;
+let fileURL=null, selected=null, clips=[], audioCtx=null, source=null, analyser=null, raf=null, recording=false, audioDest=null, selectedHook=0;
 const video=$('video'), canvas=$('canvas'), ctx=canvas.getContext('2d');
 $('sensitivity').addEventListener('input',()=>{$('sensValue').textContent=['Niedrig','Mittel','Hoch'][+$('sensitivity').value-1]});
 $('file').addEventListener('change',e=>{
@@ -98,6 +100,8 @@ function getAudioNodes(){
  analyser.fftSize=1024;
  source.connect(analyser);
  analyser.connect(audioCtx.destination);
+ audioDest=audioCtx.createMediaStreamDestination();
+ source.connect(audioDest);
  return true;
 }
 function seekTo(time){
@@ -204,28 +208,46 @@ function renderClips(){
  clips.forEach((c,i)=>{let d=document.createElement('div');d.className='clip';let left=document.createElement('div');left.innerHTML=`<b>Highlight ${i+1}</b><small>${fmt(c.start)} – ${fmt(c.end)} · Audio-Score ${(c.score*100).toFixed(1)}</small>`;let btn=document.createElement('button');btn.textContent='Auswählen';btn.onclick=()=>choose(i);d.append(left,btn);$('results').append(d)});
 }
 function fmt(s){return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`}
-function choose(i){selected=clips[i];$('previewInfo').textContent=`Ausgewählt: ${fmt(selected.start)} – ${fmt(selected.end)}`;$('preview').disabled=false;$('export').disabled=false;video.currentTime=selected.start;drawFrame();}
+function choose(i){selected=clips[i];selectedHook=i%hooks.length;setHook();$('previewInfo').textContent=`Ausgewählt: ${fmt(selected.start)} – ${fmt(selected.end)}`;$('preview').disabled=false;$('export').disabled=false;video.currentTime=selected.start;drawFrame();}
+const hooks=[
+'😭 Damit hat niemand gerechnet','💀 WAS WAR DAS BITTE?!','😂 Ich kann nicht mehr','😳 Das ging komplett schief','🔥 Dieser Moment ist WILD','👀 Warte bis zum Ende','🤯 Das ist wirklich passiert','😂 Der Chat ist ausgerastet','💀 Er hat es sofort bereut','😱 Diese Reaktion ist unbezahlbar','🎮 GTA-Moment des Tages','🤣 Das Timing ist perfekt','😳 Was passiert hier gerade?','🔥 Das musst du sehen','💀 Absolut sprachlos'];
+function setHook(){$('hook').value=hooks[selectedHook%hooks.length];drawFrame()}
+$('newHook').onclick=()=>{selectedHook++;setHook()};
+$('hook').addEventListener('input',drawFrame);
 function drawFrame(){
  if(video.readyState>=2){ctx.clearRect(0,0,360,640);let vw=video.videoWidth||16,vh=video.videoHeight||9,scale;
  if($('layout').value==='bars'){scale=Math.min(360/vw,640/vh);let w=vw*scale,h=vh*scale;ctx.fillStyle='#000';ctx.fillRect(0,0,360,640);ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
  else if($('layout').value==='crop'){scale=Math.max(360/vw,640/vh);let w=vw*scale,h=vh*scale;ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
  else {let scaleBg=Math.max(360/vw,640/vh),bw=vw*scaleBg,bh=vh*scaleBg;ctx.filter='blur(18px) brightness(.55)';ctx.drawImage(video,(360-bw)/2,(640-bh)/2,bw,bh);ctx.filter='none';let s=Math.min(360/vw,640/vh),w=vw*s,h=vh*s;ctx.drawImage(video,(360-w)/2,(640-h)/2,w,h)}
  }
+ const hook=$('hook').value.trim();
+ if(hook){ctx.save();ctx.font='bold 23px system-ui, sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineWidth=5;ctx.strokeStyle='rgba(0,0,0,.95)';ctx.fillStyle='#fff';let words=hook.split(/\s+/),lines=[],line='';for(const w of words){let t=line?line+' '+w:w;if(ctx.measureText(t).width>320&&line){lines.push(line);line=w}else line=t}if(line)lines.push(line);lines=lines.slice(0,4);lines.forEach((t,i)=>{let y=95+i*31;ctx.strokeText(t,180,y);ctx.fillText(t,180,y)});ctx.restore()}
 }
 $('layout').onchange=drawFrame;
 $('preview').onclick=async()=>{if(!selected)return;video.currentTime=selected.start;await video.play();const tick=()=>{drawFrame();if(video.currentTime>=selected.end||video.paused){video.pause();return}requestAnimationFrame(tick)};tick()};
 function mimeType(){for(const t of ['video/mp4;codecs=h264','video/mp4','video/webm;codecs=vp9','video/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(t))return t;return ''}
 $('export').onclick=async()=>{
  if(!selected||recording)return;
- const stream=canvas.captureStream(30);let audioStream=null;
- try{const ac=new (window.AudioContext||window.webkitAudioContext)();const dest=ac.createMediaStreamDestination();if(source){source.connect(dest);}else{const src=ac.createMediaElementSource(video);src.connect(dest);src.connect(ac.destination);source=src;}audioStream=dest.stream;audioStream.getAudioTracks().forEach(t=>stream.addTrack(t));await ac.resume()}catch(e){console.warn('Audio capture unavailable',e)}
- const mime=mimeType();if(!mime){setStatus('Dieser Safari-Browser unterstützt MediaRecorder nicht mit einem kompatiblen Videoformat.');return}
- let chunks=[];let rec;try{rec=new MediaRecorder(stream,{mimeType:mime})}catch(e){setStatus('Aufnahmeformat wird von diesem Browser nicht unterstützt.');return}
- recording=true;$('export').disabled=true;video.currentTime=selected.start;drawFrame();
+ if(typeof canvas.captureStream!=='function'){setStatus('Canvas-Export wird von diesem Browser nicht unterstützt.');return}
+ try{if(!getAudioNodes()||!audioDest)throw new Error('Audio-Routing nicht verfügbar');await audioCtx.resume()}catch(e){setStatus('Export mit Ton nicht möglich: Audio-Routing konnte nicht aktiviert werden.');return}
+ const stream=canvas.captureStream(30);
+ const audioTracks=audioDest.stream.getAudioTracks();
+ if(!audioTracks.length){setStatus('Export abgebrochen: Keine Audiospur verfügbar.');stream.getTracks().forEach(t=>t.stop());return}
+ audioTracks.forEach(t=>stream.addTrack(t));
+ const mime=mimeType();if(!mime){setStatus('Safari unterstützt hier kein geeignetes Aufnahmeformat.');stream.getTracks().forEach(t=>t.stop());return}
+ let chunks=[];let rec;try{rec=new MediaRecorder(stream,{mimeType:mime})}catch(e){setStatus('Aufnahme konnte nicht gestartet werden.');stream.getTracks().forEach(t=>t.stop());return}
+ recording=true;$('export').disabled=true;
+ let finished=false;
+ const stop=()=>{if(finished)return;finished=true;video.pause();if(rec.state!=='inactive')rec.stop()};
+ rec.onerror=()=>{setStatus('Fehler bei der Aufnahme.');stop()};
  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
- rec.onstop=()=>{recording=false;const blob=new Blob(chunks,{type:mime});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clip-finder-${Date.now()}.${mime.includes('mp4')?'mp4':'webm'}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);setStatus(`Export erstellt (${(blob.size/1024/1024).toFixed(1)} MB). Falls kein Download erscheint: Teilen-Menü verwenden.`);$('export').disabled=false;stream.getTracks().forEach(t=>t.stop())};
- rec.start(500);await video.play();
- const render=()=>{drawFrame();if(video.currentTime>=selected.end){video.pause();rec.stop();return}requestAnimationFrame(render)};render();
+ rec.onstop=()=>{recording=false;const blob=new Blob(chunks,{type:mime});stream.getTracks().forEach(t=>t.stop());$('export').disabled=false;if(!blob.size){setStatus('Export fehlgeschlagen: leere Aufnahme.');return}const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clip-finder-${Date.now()}.${mime.includes('mp4')?'mp4':'webm'}`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);setStatus(`Export erstellt (${(blob.size/1024/1024).toFixed(1)} MB). Ton bitte in der gespeicherten Datei prüfen.`)};
+ try{
+  video.pause();await seekTo(selected.start);
+  drawFrame();rec.start(500);await video.play();
+  const render=()=>{if(finished)return;drawFrame();if(video.currentTime>=selected.end||video.ended){stop();return}if(video.paused){setStatus('Video wurde während des Exports angehalten.');stop();return}requestAnimationFrame(render)};render();
+  setTimeout(()=>{if(!finished){setStatus('Export-Zeitlimit erreicht.');stop()}},Math.max(15000,(selected.end-selected.start+12)*1000));
+ }catch(e){console.error(e);setStatus('Export abgebrochen: Video konnte nicht zuverlässig zur Startposition springen.');stop()}
 };
 if('serviceWorker' in navigator && location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js').catch(()=>{});
 </script></body></html>
