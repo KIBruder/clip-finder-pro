@@ -33,7 +33,7 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 </style>
 </head>
 <body><main>
-<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA 2.1 · 0 €</div></div>
+<div class="top"><div class="brand">✂ CLIP-FINDER PRO</div><div class="tag">MOBILE BETA 2.3 · 0 €</div></div>
 <h1>Finde deine besten Momente.</h1><p class="sub">Lokale Videoanalyse direkt auf deinem iPhone. Deine Videodatei wird nicht hochgeladen.</p>
 <section class="panel">
 <div class="section">1. Video auswählen</div>
@@ -67,6 +67,9 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 </section>
 <section class="panel">
 <div class="section">4. Clip-Vorschau & Export</div>
+<label for="quality">Exportqualität</label>
+<select id="quality"><option value="1080" selected>Full HD · 1080p · höhere Bitrate</option><option value="720">Standard HD · 720p · kleinere Datei</option></select>
+<p class="muted">1080p benötigt mehr Rechenleistung und Speicher. Wenn Safari abbricht oder das iPhone stark warm wird, auf 720p wechseln.</p>
 <div id="previewInfo" class="muted">Wähle nach der Analyse einen Highlight-Vorschlag.</div>
 <label for="hookCategory">Hook-Kategorie</label>
 <select id="hookCategory"><option value="all">Alle Kategorien</option><option value="funny">Funny / Meme</option><option value="wtf">WTF / Unerwartet</option><option value="epic">Epic / Hype</option><option value="fail">Fail / Rage</option><option value="mystery">Secret / Neugier</option><option value="reaction">Streamer-Reaktion</option></select>
@@ -76,11 +79,11 @@ footer{text-align:center;color:#71829b;font-size:11px;padding:20px 4px}
 <p class="muted">Hooks sind Vorschläge, keine automatisch verifizierten Aussagen über den Videoinhalt.</p>
 <div class="actions"><button type="button" id="clearHistory" class="secondary">Wiederholungshistorie dieser Datei zurücksetzen</button></div>
 <p class="muted">Die Historie wird lokal in Safari gespeichert. Bereits vorgeschlagene Zeitbereiche werden beim erneuten Import derselben Datei übersprungen.</p>
-<canvas id="canvas" width="720" height="1280"></canvas>
+<canvas id="canvas" width="1080" height="1920"></canvas>
 <div class="actions" style="margin-top:12px"><button id="preview" disabled>Vorschau starten</button><button id="export" disabled>Clip aufnehmen</button></div>
 <p class="muted">Export erfolgt als Echtzeit-Aufnahme der Vorschau. Format und Speichern hängen von iOS/Safari ab. Für lange Clips Bildschirm nicht sperren und Safari geöffnet lassen.</p>
 </section>
-<footer>CLIP-FINDER PRO 2.2 · Browser Edition · Verarbeitung lokal auf deinem Gerät</footer>
+<footer>CLIP-FINDER PRO 2.3 · HD Quality · Verarbeitung lokal auf deinem Gerät</footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -317,12 +320,19 @@ $('export').onclick=async()=>{
   await audioCtx.resume();
   if(audioCtx.state!=='running')throw new Error('Audio wurde von iOS blockiert');
   if(typeof canvas.captureStream!=='function')throw new Error('Canvas-Aufnahme nicht unterstützt');
+  const exportSize=$('quality').value==='720'?720:1080;
+  canvas.width=exportSize;
+  canvas.height=Math.round(exportSize*16/9);
+  drawFrame();
   stream=canvas.captureStream(30);
   const tracks=audioDest.stream.getAudioTracks();
   if(!tracks.length)throw new Error('Keine Audiospur für Aufnahme verfügbar');
   tracks.forEach(t=>stream.addTrack(t));
   const mime=mimeType();if(!mime)throw new Error('Kein kompatibles Aufnahmeformat');
-  rec=new MediaRecorder(stream,{mimeType:mime});
+  const videoBitrate=exportSize===1080?10000000:5500000;
+  const recorderOptions={mimeType:mime,videoBitsPerSecond:videoBitrate,audioBitsPerSecond:192000};
+  try{rec=new MediaRecorder(stream,recorderOptions)}
+  catch(optionError){rec=new MediaRecorder(stream,{mimeType:mime})}
   const chunks=[];
   rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
   rec.onerror=()=>setStatus('Aufnahmefehler in Safari. Export nicht abgeschlossen.');
@@ -331,7 +341,7 @@ $('export').onclick=async()=>{
    if(blob.size<1024){setStatus('Export fehlgeschlagen: keine brauchbare Videodatei erzeugt.');$('export').disabled=false;return}
    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`clip-finder-${Date.now()}.${mime.includes('mp4')?'mp4':'webm'}`;
    document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),120000);
-   setStatus(`Export erstellt (${(blob.size/1024/1024).toFixed(1)} MB). Bitte Ton im gespeicherten Clip prüfen.`);
+   setStatus(`Export erstellt · ${exportSize}p · ${(blob.size/1024/1024).toFixed(1)} MB. Bitte Ton und Bildschärfe im gespeicherten Clip prüfen.`);
    $('export').disabled=false;stream.getTracks().forEach(t=>t.stop());
   };
   video.pause();await seekTo(selected.start);drawFrame();
